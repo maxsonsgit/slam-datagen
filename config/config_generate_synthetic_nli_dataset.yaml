@@ -2,7 +2,7 @@ random_seed: 11
 
 n_train: 1000
 n_eval: 200
-n_entities: 1000
+n_entities: 10000 # >> n_types (500)
 
 background_knowledge: explicit # explicit|implicit
 

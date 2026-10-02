@@ -5,7 +5,7 @@ Data generation library for LLMs and other foundational models
 
 1. Create a virtual environment, e.g.
 ```bash
-conda create -n .slam-datagen-env python=3.12
+conda create -n myenv python=3.12
 conda activate myenv
 ```
 2. Install necessary packages
@@ -27,7 +27,7 @@ python slam_datagen/scripts/XXX.py
 Generates the merge-quality dataset where every line is a persona with ground-truth attributes plus JSON/XML/Markdown chunks that mix the target record with distractors.
 
 ```bash
-conda activate .slam-datagen-env
+conda activate myenv
 python slam_datagen/scripts/generate_merge_quality_dataset.py
 ```
 
@@ -63,7 +63,7 @@ python slam_datagen/scripts/generate_merge_quality_dataset.py
 Synthesizes human-like chat snippets plus random alphanumeric strings. Uses configurable LLM prompts and writes `{text, type}` JSONL entries (type is `synthetic` or `random`).
 
 ```bash
-conda activate .slam-datagen-env
+conda activate myenv
 python slam_datagen/scripts/generate_human_messages.py
 ```
 
@@ -93,7 +93,7 @@ python slam_datagen/scripts/generate_human_messages.py
 Synthesizes human-like chat snippets plus random alphanumeric strings. Uses configurable LLM prompts and writes `{text, type}` JSONL entries (type is `synthetic` or `random`).
 
 ```bash
-conda activate .slam-datagen-env
+conda activate myenv
 python slam_datagen/scripts/generate_synthetic_nli_dataset.py
 ```
 

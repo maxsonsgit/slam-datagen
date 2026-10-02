@@ -6,6 +6,7 @@ import networkx as nx
 from pathlib import Path
 from typing import List, Any
 import json
+from collections import defaultdict
 
 
 @dataclass
@@ -24,7 +25,7 @@ class DatasetSample:
 
 
 def build_synthetic_nli_dataset(cfg: DictConfig) -> list[DatasetSample]:
-    W = HiddenWord(n_entities=cfg.n_entities)
+    W = HiddenWord(n_entities=cfg.n_entities, word_seed=cfg.random_seed)
     W.sample_hiden_world()
     samples = []
     
@@ -94,6 +95,40 @@ class HiddenWord():
 
         random.seed(self.word_seed)
 
+    def _create_types_polytree(self, types: List[str]):
+        tree = nx.random_labeled_tree(len(types))
+        polytree = nx.DiGraph()
+        polytree.add_nodes_from(tree)
+        polytree.add_edges_from(nx.bfs_edges(tree, 0))
+
+        random.shuffle(types)
+        for i in range(len(types)):
+            polytree.nodes[i]["type"] = types[i]
+
+        return polytree
+
+    def _create_types_polyforest(self, types: List[str], avg_types_in_tree=16) -> List[nx.DiGraph]:
+        polyforest = []
+
+        random.shuffle(types)
+        cur_type = 0
+        while len(types) - cur_type > 32:
+            cnt_types = random.randint(avg_types_in_tree - 5, avg_types_in_tree + 5)
+            polyforest.append(self._create_types_polytree(types[cur_type : cur_type + cnt_types]))
+            cur_type += cnt_types
+        else:
+            polyforest.append(self._create_types_polytree(types[cur_type:]))
+                
+        return polyforest
+    
+    @staticmethod
+    def _get_leaves(polytree: nx.DiGraph) -> List[str]:
+        return [polytree.nodes[n]["type"] for n in polytree.nodes if polytree.out_degree(n) == 0]
+
+    @staticmethod
+    def _get_leaf_nodes(polytree: nx.DiGraph) -> List[int]:
+        return [n for n in polytree.nodes if polytree.out_degree(n) == 0]
+            
     def sample_hiden_world(self):
         colors = [
             "red", "green", "blue", "yellow", "orange",
@@ -127,74 +162,79 @@ class HiddenWord():
             "wolf", "fox", "red panda", "kangaroo", "penguin"
         ]
 
-        # ? made dynamyc range of types
         types = [f"t{i}" for i in range(1000)]
         chosen_types = random.sample(types, 500)
  
         entities = [f"e{i}" for i in range(self.n_entities * 2)]
         chosen_entities = random.sample(entities, self.n_entities)
 
-        self.zero_hop_dict = dict()
-        self.one_hop_dict = dict()
-        self.one_hop_DAG = nx.DiGraph()
-        self.two_hop_DAG = nx.DiGraph()
+        self.zero_hop_dict = {
+            "colors": dict(),
+            "locations": dict(),
+            "shapes": dict(),
+            "animals": dict(),
+        }
+        temp_dict = dict()
+        self.one_hop_dict = defaultdict(list)
+        self.polyforest = self._create_types_polyforest(chosen_types)
 
-        self.one_hop_DAG.add_nodes_from(chosen_types)
-        self.two_hop_DAG.add_nodes_from(chosen_entities)
-
-        self.add_edges_to_DAG(self.one_hop_DAG, list(self.one_hop_DAG.nodes()))
-        self.add_edges_to_DAG(self.two_hop_DAG, list(self.two_hop_DAG.nodes()))
-
-        leaf_types = [t for t in self.one_hop_DAG.nodes() if self.one_hop_DAG.in_degree(t) == 0]
+        leaf_types = [leaf for tree in self.polyforest for leaf in self._get_leaves(tree)]
+        print(leaf_types)
         self.leaf_types = leaf_types
-        self.add_true_label_to_all_entities(self.zero_hop_dict,
-                                            random.sample(colors + locations + shapes + animals, 50),
-                                            chosen_entities)
-        self.add_true_label_to_all_entities(self.one_hop_dict,
+        self.add_true_label_to_all_entities(self.zero_hop_dict["colors"],
+                                            random.sample(colors, 13),
+                                            chosen_entities[:self.n_entities//4])
+        self.add_true_label_to_all_entities(self.zero_hop_dict["locations"],
+                                            random.sample(locations, 13),
+                                            chosen_entities[self.n_entities//4 : self.n_entities//2])
+        self.add_true_label_to_all_entities(self.zero_hop_dict["shapes"],
+                                            random.sample(shapes, 13),
+                                            chosen_entities[self.n_entities//2 : 3 * self.n_entities//4])
+        self.add_true_label_to_all_entities(self.zero_hop_dict["animals"],
+                                            random.sample(animals, 13),
+                                            chosen_entities[3 * self.n_entities//4:])
+        self.add_true_label_to_all_entities(temp_dict,
                                             leaf_types,
                                             chosen_entities)
+
+        for key, value in temp_dict.items():
+            self.one_hop_dict[value].append(key)
 
     def add_true_label_to_all_entities(self, d, labels: List[str], entities: List[str]):
         for entity in entities:
             d[entity] = random.choice(labels)
 
-    def add_edges_to_DAG(self, DAG: nx.DiGraph, nodes: List[str], p=0.35):
-        for i in range(len(nodes)):
-            for j in range(i + 1, len(nodes)):
-                if random.random() < p:
-                    DAG.add_edge(nodes[i], nodes[j])
-
     def generate_zero_hop_sample(self, distractor_difficulty, split) -> DatasetSample:
         print("zero")
         gold_label = random.choice(["entailment", "neutral", "contradiction"])
-        entity = random.choice(list(self.zero_hop_dict.keys()))
+        type = random.choice(list(self.zero_hop_dict.keys()))
+        entity = random.choice(list(self.zero_hop_dict[type].keys()))
         chosen_entities = {entity}
         premise = []
 
         if gold_label == "entailment":
-            premise.append(f"{entity} is {self.zero_hop_dict[entity]}")
+            premise.append(f"{entity} is {self.zero_hop_dict[type][entity]}")
             hypothesis = premise[0]
         elif gold_label == "neutral":
-            premise.append(f"{entity} is {self.zero_hop_dict[entity]}")
-            entity = random.choice(list(self.zero_hop_dict.keys()))
+            premise.append(f"{entity} is {self.zero_hop_dict[type][entity]}")
+            entity = random.choice(list(self.zero_hop_dict[type].keys()))
             while entity in chosen_entities:
-                entity = random.choice(list(self.zero_hop_dict.keys()))
-            hypothesis = f"{entity} is {self.zero_hop_dict[entity]}"
+                entity = random.choice(list(self.zero_hop_dict[type].keys()))
+            hypothesis = f"{entity} is {self.zero_hop_dict[type][entity]}"
             chosen_entities.add(entity)
         elif gold_label == "contradiction":
-            premise.append(f"{entity} is {self.zero_hop_dict[entity]}")
-            false_label = random.choice(list(self.zero_hop_dict.values()))
-            while false_label == self.zero_hop_dict[entity]:
-                false_label = random.choice(list(self.zero_hop_dict.values()))
+            premise.append(f"{entity} is {self.zero_hop_dict[type][entity]}")
+            false_label = random.choice(list(self.zero_hop_dict[type].values()))
+            while false_label == self.zero_hop_dict[type][entity]:
+                false_label = random.choice(list(self.zero_hop_dict[type].values()))
             hypothesis = f"{entity} is {false_label}"
             chosen_entities = {entity}
             
-        # ? надо ли чтобы не относящиеся к делу факты были реальными (сейчас реализовано не так)
         while len(chosen_entities) != distractor_difficulty + 1:
-            entity = random.choice(list(self.zero_hop_dict.keys()))
+            entity = random.choice(list(self.zero_hop_dict[type].keys()))
             if entity not in chosen_entities:
                 chosen_entities.add(entity)
-                premise.append(f"{entity} is {random.choice(list(self.zero_hop_dict.values()))}")
+                premise.append(f"{entity} is {self.zero_hop_dict[type][entity]}")
         
         self.last_used_id += 1
         random.shuffle(premise)
@@ -205,42 +245,59 @@ class HiddenWord():
     def generate_one_hop_sample(self, distractor_difficulty, background_knowledge, split) -> DatasetSample:
         print("one")
         gold_label = random.choice(["entailment", "neutral", "contradiction"])
-        entity = random.choice(list(self.one_hop_dict.keys()))
-        child_type = self.one_hop_dict[entity]
-        parents = list(self.one_hop_DAG.successors(child_type))
-        while not parents:
-            entity = random.choice(list(self.one_hop_dict.keys()))
-            child_type = self.one_hop_dict[entity]
-            parents = list(self.one_hop_DAG.successors(child_type))
-        parent_type = random.choice(parents)
+
+        while True:
+            chosen_type_tree = random.choice(self.polyforest)
+            chosen_leaf = random.choice(self._get_leaf_nodes(chosen_type_tree))
+            child_type = chosen_type_tree.nodes[chosen_leaf]["type"]
+
+            entities = self.one_hop_dict.get(child_type)
+            if entities:
+                break
+
+        entity = random.choice(entities)
+        parent = next(iter(chosen_type_tree.predecessors(chosen_leaf)))
+        parent_type = chosen_type_tree.nodes[parent]["type"]
         
         chosen_entities = {entity}
         premise = [f"{entity} is a {child_type}"]
+
+        chosen_types = set()
+        chosen_types.add(child_type)
 
         if background_knowledge == "explicit":
             premise.append(f"{child_type} is a subtype of {parent_type}")
 
         if gold_label == "entailment":
             hypothesis = f"{entity} is a {parent_type}"
+            no_type = random.choice([t for t in self.leaf_types if t not in {child_type}])
+            premise.append(f"No entity is both {child_type} and {no_type}")
+            chosen_types.add(no_type)
         elif gold_label == "neutral":
-            other_entity = random.choice(list(self.one_hop_dict.keys()))
-            while other_entity == entity:
-                other_entity = random.choice(list(self.one_hop_dict.keys()))
-            other_type = random.choice(list(self.one_hop_DAG.nodes()))
-            hypothesis = f"{other_entity} is a {other_type}"
-            chosen_entities.add(other_entity)
-        # ? is that ok
+            other_type = random.choice([t for t in self.leaf_types if t != child_type])
+            no_type = random.choice([t for t in self.leaf_types if t not in {child_type, other_type}])
+            hypothesis = f"{entity} is a {other_type}"
+            premise.append(f"No entity is both {child_type} and {no_type}")
+            chosen_types.add(other_type)
+            chosen_types.add(no_type)
         elif gold_label == "contradiction":
-            other_leaf = random.choice([t for t in self.leaf_types if t != child_type])
-            hypothesis = f"{entity} is a {other_leaf}"
+            other_type = random.choice([t for t in self.leaf_types if t != child_type])
+            hypothesis = f"{entity} is a {other_type}"
+            premise.append(f"No entity is both {child_type} and {other_type}")
+            chosen_types.add(other_type)
 
-        while len(chosen_entities) != distractor_difficulty + 1:
-            other_entity = random.choice(list(self.one_hop_dict.keys()))
-            if other_entity not in chosen_entities:
-                chosen_entities.add(other_entity)
-                other_type = self.one_hop_dict[other_entity]
-                premise.append(f"{other_entity} is a {other_type}")
-
+        while len(premise) != distractor_difficulty + 2:
+            while True:
+                other_chosen_type_tree = random.choice(self.polyforest)
+                other_chosen_leaf = random.choice(self._get_leaf_nodes(other_chosen_type_tree))
+                other_child_type = other_chosen_type_tree.nodes[other_chosen_leaf]["type"]
+    
+                entities = self.one_hop_dict.get(other_child_type)
+                if entities and other_child_type not in chosen_types:
+                    break
+            
+            entity = random.choice(entities)
+            premise += [f"{entity} is a {other_child_type}"]
         
         self.last_used_id += 1
         random.shuffle(premise)
@@ -251,173 +308,68 @@ class HiddenWord():
     def generate_two_hop_sample(self, distractor_difficulty, background_knowledge, split) -> DatasetSample:
         print("two")
         gold_label = random.choice(["entailment", "neutral", "contradiction"])
-        use_taxonomy = random.random() < 0.5
+
+        while True:
+            chosen_type_tree = random.choice(self.polyforest)
+            chosen_leaf = random.choice(self._get_leaf_nodes(chosen_type_tree))
+            child_type = chosen_type_tree.nodes[chosen_leaf]["type"]
+
+            entities = self.one_hop_dict.get(child_type)
+            if not entities:
+                continue
+
+            parents = list(chosen_type_tree.predecessors(chosen_leaf))
+            if not parents:
+                continue
+            parent = parents[0]
+
+            grandparents = list(chosen_type_tree.predecessors(parent))
+            if not grandparents:
+                continue
+            grandparent = grandparents[0]
+            break
+
+        entity = random.choice(entities)
+        parent_type = chosen_type_tree.nodes[parent]["type"]
+        grandparent_type = chosen_type_tree.nodes[grandparent]["type"]
+
+        related_types = {grandparent_type} | {
+            chosen_type_tree.nodes[n]["type"] for n in nx.descendants(chosen_type_tree, grandparent)
+        }
+        outside_leaves = [t for t in self.leaf_types if t not in related_types]
+
+        chosen_entities = {entity}
+        premise = [f"{entity} is a {child_type}"]
+
+        if background_knowledge == "explicit":
+            premise.append(f"{child_type} is a subtype of {parent_type}")
+            premise.append(f"{parent_type} is a subtype of {grandparent_type}")
 
         if gold_label == "entailment":
-            if use_taxonomy:
-                entity = None
-                leaf_type = None
-                parent_type = None
-                grandparent_type = None
-                for _ in range(100):
-                    e = random.choice(list(self.one_hop_dict.keys()))
-                    leaf = self.one_hop_dict[e]
-                    parents = list(self.one_hop_DAG.successors(leaf))
-                    if not parents:
-                        continue
-                    p = random.choice(parents)
-                    grandparents = list(self.one_hop_DAG.successors(p))
-                    if grandparents:
-                        entity = e
-                        leaf_type = leaf
-                        parent_type = p
-                        grandparent_type = random.choice(grandparents)
-                        break
-                if entity is not None:
-                    premise = [f"{entity} is a {leaf_type}"]
-                    if background_knowledge == "explicit":
-                        premise.append(f"{leaf_type} is a subtype of {parent_type}")
-                        premise.append(f"{parent_type} is a subtype of {grandparent_type}")
-                    hypothesis = f"{entity} is a {grandparent_type}"
-                    chosen_entities = {entity}
-                    chosen_types = {leaf_type, parent_type, grandparent_type}
-                else:
-                    use_taxonomy = False
-
-            else:
-                a = b = c = None
-                for _ in range(100):
-                    b_candidate = random.choice(list(self.two_hop_DAG.nodes()))
-                    c_candidates = list(self.two_hop_DAG.successors(b_candidate))
-                    if not c_candidates:
-                        continue
-                    a_candidates = list(self.two_hop_DAG.predecessors(b_candidate))
-                    if a_candidates:
-                        a = random.choice(a_candidates)
-                        b = b_candidate
-                        c = random.choice(c_candidates)
-                        break
-                premise = [f"{a} is left of {b}", f"{b} is left of {c}"]
-                if background_knowledge == "explicit":
-                    premise.append("Rule: left_of is transitive and antisymmetric")
-                hypothesis = f"{a} is left of {c}"
-                chosen_entities = {a, b, c}
+            hypothesis = f"{entity} is a {grandparent_type}"
+            no_type = random.choice(outside_leaves)
+            premise.append(f"No entity is both {grandparent_type} and {no_type}")
         elif gold_label == "neutral":
-            if use_taxonomy:
-                entity = None
-                leaf_type = None
-                parent_type = None
-                grandparent_type = None
-                for _ in range(100):
-                    e = random.choice(list(self.one_hop_dict.keys()))
-                    leaf = self.one_hop_dict[e]
-                    parents = list(self.one_hop_DAG.successors(leaf))
-                    if not parents:
-                        continue
-                    p = random.choice(parents)
-                    grandparents = list(self.one_hop_DAG.successors(p))
-                    if grandparents:
-                        entity = e
-                        leaf_type = leaf
-                        parent_type = p
-                        grandparent_type = random.choice(grandparents)
-                        break
-                if entity is not None:
-                    premise = [f"{entity} is a {leaf_type}"]
-                    if background_knowledge == "explicit":
-                        premise.append(f"{leaf_type} is a subtype of {parent_type}")
-                        premise.append(f"{parent_type} is a subtype of {grandparent_type}")
-                    other_entity = random.choice(list(self.one_hop_dict.keys()))
-                    while other_entity == entity:
-                        other_entity = random.choice(list(self.one_hop_dict.keys()))
-                    other_type = random.choice(list(self.one_hop_DAG.nodes()))
-                    hypothesis = f"{other_entity} is a {other_type}"
-                    chosen_entities = {entity, other_entity}
-                    chosen_types = {leaf_type, parent_type, grandparent_type, other_type}
-                else:
-                    use_taxonomy = False
-            else:
-                edges = list(self.two_hop_DAG.edges())
-                (a1, b1), (a2, b2) = random.sample(edges, 2)
-                premise = [f"{a1} is left of {b1}", f"{a2} is left of {b2}"]
-                if background_knowledge == "explicit":
-                    premise.append("Rule: left_of is transitive")
-                hypothesis = f"{a1} is left of {a2}" 
-                chosen_entities = {a1, b1, a2, b2}
+            other_type = random.choice(outside_leaves)
+            no_type = random.choice([t for t in outside_leaves if t != other_type])
+            hypothesis = f"{entity} is a {other_type}"
+            premise.append(f"No entity is both {grandparent_type} and {no_type}")
         elif gold_label == "contradiction":
-            if use_taxonomy:
-                entity = None
-                leaf_type = None
-                parent_type = None
-                grandparent_type = None
-                for _ in range(100):
-                    e = random.choice(list(self.one_hop_dict.keys()))
-                    leaf = self.one_hop_dict[e]
-                    parents = list(self.one_hop_DAG.successors(leaf))
-                    if not parents:
-                        continue
-                    p = random.choice(parents)
-                    grandparents = list(self.one_hop_DAG.successors(p))
-                    if grandparents:
-                        entity = e
-                        leaf_type = leaf
-                        parent_type = p
-                        grandparent_type = random.choice(grandparents)
-                        break
-                if entity is not None:
-                    leaf_types = [t for t in self.one_hop_DAG.nodes() if self.one_hop_DAG.in_degree(t) == 0]
-                    other_leaf = random.choice([t for t in leaf_types if t != leaf_type])
-                    premise = [f"{entity} is a {leaf_type}"]
-                    if background_knowledge == "explicit":
-                        premise.append(f"{leaf_type} is a subtype of {parent_type}")
-                        premise.append(f"{parent_type} is a subtype of {grandparent_type}")
-                    hypothesis = f"{entity} is a {other_leaf}"
-                    chosen_entities = {entity}
-                    chosen_types = {leaf_type, parent_type, grandparent_type, other_leaf}
-                else:
-                    use_taxonomy = False
+            other_type = random.choice(outside_leaves)
+            hypothesis = f"{entity} is a {other_type}"
+            premise.append(f"No entity is both {grandparent_type} and {other_type}")
 
-            else:
-                a = b = c = None
-                for _ in range(100):
-                    b_candidate = random.choice(list(self.two_hop_DAG.nodes()))
-                    c_candidates = list(self.two_hop_DAG.successors(b_candidate))
-                    if not c_candidates:
-                        continue
-                    a_candidates = list(self.two_hop_DAG.predecessors(b_candidate))
-                    if a_candidates:
-                        a = random.choice(a_candidates)
-                        b = b_candidate
-                        c = random.choice(c_candidates)
-                        break
-                premise = [f"{a} is left of {b}", f"{b} is left of {c}"]
-                if background_knowledge == "explicit":
-                    premise.append("Rule: left_of is transitive and antisymmetric")
-                hypothesis = f"{c} is left of {a}"
-                chosen_entities = {a, b, c}
-
-        added_distractors = 0
-        while added_distractors < distractor_difficulty:
-            if use_taxonomy:
-                other_entity = random.choice(list(self.one_hop_dict.keys()))
-                if other_entity not in chosen_entities:
-                    chosen_entities.add(other_entity)
-                    other_type = self.one_hop_dict[other_entity]
-                    premise.append(f"{other_entity} is a {other_type}")
-                    added_distractors += 1
-            else:
-                other_a = random.choice(list(self.two_hop_DAG.nodes()))
-                other_b_candidates = list(self.two_hop_DAG.successors(other_a))
-                if not other_b_candidates:
-                    continue
-                other_b = random.choice(other_b_candidates)
-                if other_a not in chosen_entities:
-                    chosen_entities.add(other_a)
-                if other_b not in chosen_entities:
-                    chosen_entities.add(other_b)
-                premise.append(f"{other_a} is left of {other_b}")
-                added_distractors += 1
-
+        start_len = len(premise)
+        while len(premise) != start_len + distractor_difficulty:
+            other_type = random.choice(self.leaf_types)
+            other_entities = self.one_hop_dict.get(other_type)
+            if not other_entities:
+                continue
+            other_entity = random.choice(other_entities)
+            if other_entity in chosen_entities:
+                continue
+            chosen_entities.add(other_entity)
+            premise.append(f"{other_entity} is a {other_type}")
 
         self.last_used_id += 1
         random.shuffle(premise)
