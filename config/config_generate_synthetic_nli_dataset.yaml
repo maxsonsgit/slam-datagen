@@ -4,8 +4,6 @@ n_train: 1000
 n_eval: 200
 n_entities: 10000 # >> n_types (500)
 
-background_knowledge: explicit # explicit|implicit
-
 hop_difficulty_distribution:
   - value: 0
     weight: 50

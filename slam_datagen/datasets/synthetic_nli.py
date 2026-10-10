@@ -18,7 +18,6 @@ class DatasetSample:
     split: str # train | eval | (опционально) test
     hop_difficulty: int # целое число из множества {0,1,2}
     distractor_difficulty: int # целое число из множества {1,2,3}
-    background_knowledge: str # explicit | implicit
     world_seed: str # как сделать!? сид, использованный для генерации скрытого мира (для воспроизводимости) 
     templates_version: str # что это?
     ood_tag: str # режим разбиения iid | entity_heldout | taxonomy_heldout | relation_pattern_heldout
@@ -41,9 +40,9 @@ def build_synthetic_nli_dataset(cfg: DictConfig) -> list[DatasetSample]:
         if choosen_hop[i] == 0:
             samples.append(W.generate_zero_hop_sample(distractor_difficulty=chosen_distractors[i], split="train"))
         elif choosen_hop[i] == 1:
-            samples.append(W.generate_one_hop_sample(distractor_difficulty=chosen_distractors[i], background_knowledge="explicit", split="train"))
+            samples.append(W.generate_one_hop_sample(distractor_difficulty=chosen_distractors[i], split="train"))
         elif choosen_hop[i] == 2:
-            samples.append(W.generate_two_hop_sample(distractor_difficulty=chosen_distractors[i], background_knowledge="explicit", split="train"))
+            samples.append(W.generate_two_hop_sample(distractor_difficulty=chosen_distractors[i], split="train"))
 
     chosen_distractors = random.choices(distractor_difficulty, weights=distractor_weights, k=cfg.n_eval)
     choosen_hop = random.choices(hop_difficulty, weights=hop_weights, k=cfg.n_eval)
@@ -51,9 +50,9 @@ def build_synthetic_nli_dataset(cfg: DictConfig) -> list[DatasetSample]:
         if choosen_hop[i] == 0:
             samples.append(W.generate_zero_hop_sample(distractor_difficulty=chosen_distractors[i], split="eval"))
         elif choosen_hop[i] == 1:
-            samples.append(W.generate_one_hop_sample(distractor_difficulty=chosen_distractors[i], background_knowledge="explicit", split="eval"))
+            samples.append(W.generate_one_hop_sample(distractor_difficulty=chosen_distractors[i], split="eval"))
         elif choosen_hop[i] == 2:
-            samples.append(W.generate_two_hop_sample(distractor_difficulty=chosen_distractors[i], background_knowledge="explicit", split="eval"))
+            samples.append(W.generate_two_hop_sample(distractor_difficulty=chosen_distractors[i], split="eval"))
     
     return samples
 
@@ -79,7 +78,6 @@ def _serialize_sample(sample: DatasetSample) -> dict[str, Any]:
         "split": sample.split,
         "hop_difficulty": sample.hop_difficulty,
         "distractor_difficulty": sample.distractor_difficulty,
-        "background_knowledge": sample.background_knowledge,
         "world_seed": sample.world_seed,
         "templates_version": sample.templates_version,
         "ood_tag": sample.ood_tag,
@@ -238,11 +236,11 @@ class HiddenWord():
         
         self.last_used_id += 1
         random.shuffle(premise)
-        sample = DatasetSample(self.last_used_id, premise, hypothesis, gold_label, split, 0, distractor_difficulty, "explicit", self.word_seed, self.templates_version, self.ood_tag)
+        sample = DatasetSample(self.last_used_id, premise, hypothesis, gold_label, split, 0, distractor_difficulty, self.word_seed, self.templates_version, self.ood_tag)
 
         return sample
 
-    def generate_one_hop_sample(self, distractor_difficulty, background_knowledge, split) -> DatasetSample:
+    def generate_one_hop_sample(self, distractor_difficulty, split) -> DatasetSample:
         print("one")
         gold_label = random.choice(["entailment", "neutral", "contradiction"])
 
@@ -265,8 +263,7 @@ class HiddenWord():
         chosen_types = set()
         chosen_types.add(child_type)
 
-        if background_knowledge == "explicit":
-            premise.append(f"{child_type} is a subtype of {parent_type}")
+        premise.append(f"{child_type} is a subtype of {parent_type}")
 
         if gold_label == "entailment":
             hypothesis = f"{entity} is a {parent_type}"
@@ -301,11 +298,11 @@ class HiddenWord():
         
         self.last_used_id += 1
         random.shuffle(premise)
-        sample = DatasetSample(self.last_used_id, premise, hypothesis, gold_label, split, 1, distractor_difficulty, background_knowledge, self.word_seed, self.templates_version, self.ood_tag)
+        sample = DatasetSample(self.last_used_id, premise, hypothesis, gold_label, split, 1, distractor_difficulty, self.word_seed, self.templates_version, self.ood_tag)
 
         return sample
     
-    def generate_two_hop_sample(self, distractor_difficulty, background_knowledge, split) -> DatasetSample:
+    def generate_two_hop_sample(self, distractor_difficulty, split) -> DatasetSample:
         print("two")
         gold_label = random.choice(["entailment", "neutral", "contradiction"])
 
@@ -341,9 +338,8 @@ class HiddenWord():
         chosen_entities = {entity}
         premise = [f"{entity} is a {child_type}"]
 
-        if background_knowledge == "explicit":
-            premise.append(f"{child_type} is a subtype of {parent_type}")
-            premise.append(f"{parent_type} is a subtype of {grandparent_type}")
+        premise.append(f"{child_type} is a subtype of {parent_type}")
+        premise.append(f"{parent_type} is a subtype of {grandparent_type}")
 
         if gold_label == "entailment":
             hypothesis = f"{entity} is a {grandparent_type}"
@@ -373,7 +369,7 @@ class HiddenWord():
 
         self.last_used_id += 1
         random.shuffle(premise)
-        sample = DatasetSample(self.last_used_id, premise, hypothesis, gold_label, split, 2, distractor_difficulty, background_knowledge, self.word_seed, self.templates_version, self.ood_tag)
+        sample = DatasetSample(self.last_used_id, premise, hypothesis, gold_label, split, 2, distractor_difficulty, self.word_seed, self.templates_version, self.ood_tag)
 
         return sample
 
