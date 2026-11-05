@@ -90,7 +90,7 @@ python slam_datagen/scripts/generate_human_messages.py
 
 ### `generate_synthetic_nli_dataset.py`
 
-Synthesizes human-like chat snippets plus random alphanumeric strings. Uses configurable LLM prompts and writes `{text, type}` JSONL entries (type is `synthetic` or `random`).
+Synthesizes dataset for nli task where every line contains gold_label, premis, hypothesis plus extraconfiguration info.
 
 ```bash
 conda activate myenv
@@ -108,7 +108,6 @@ python slam_datagen/scripts/generate_synthetic_nli_dataset.py
    - `split`: `train` or `eval` (optional: `test`)
    - `hop_difficulty`: integer in `{0,1,2}`
    - `distractor_difficulty`: integer in `{1,2,3}` (number of irrelevant premise facts)
-   - `background_knowledge`: one of `explicit`, `implicit`
    - `world_seed`: seed used to generate the hidden world (for reproducibility)
    - `templates_version`: identifier of the rendering template set
    - `ood_tag`: optional string describing the split regime (e.g., `iid`, `entity_heldout`, ...)

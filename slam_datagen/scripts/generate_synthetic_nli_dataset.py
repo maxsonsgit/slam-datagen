@@ -36,7 +36,6 @@ def generate_synthetic_nli_dataset(cfg: DictConfig) -> None:
                     "split": sample.split,
                     "hop_difficulty": sample.hop_difficulty,
                     "distractor_difficulty": sample.distractor_difficulty,
-                    "background_knowledge": sample.background_knowledge,
                     "world_seed": sample.world_seed,
                     "templates_version": sample.templates_version,
                     "ood_tag": sample.ood_tag,
