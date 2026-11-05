@@ -215,10 +215,11 @@ class HiddenWord():
             hypothesis = premise[0]
         elif gold_label == "neutral":
             premise.append(f"{entity} is {self.zero_hop_dict[type][entity]}")
-            entity = random.choice(list(self.zero_hop_dict[type].keys()))
+            neutral_type = random.choice(list(self.zero_hop_dict.keys()))
+            entity = random.choice(list(self.zero_hop_dict[neutral_type].keys()))
             while entity in chosen_entities:
                 entity = random.choice(list(self.zero_hop_dict[type].keys()))
-            hypothesis = f"{entity} is {self.zero_hop_dict[type][entity]}"
+            hypothesis = f"{entity} is {self.zero_hop_dict[neutral_type][entity]}"
             chosen_entities.add(entity)
         elif gold_label == "contradiction":
             premise.append(f"{entity} is {self.zero_hop_dict[type][entity]}")
@@ -229,10 +230,11 @@ class HiddenWord():
             chosen_entities = {entity}
             
         while len(chosen_entities) != distractor_difficulty + 1:
-            entity = random.choice(list(self.zero_hop_dict[type].keys()))
+            distractor_type = random.choice(list(self.zero_hop_dict.keys()))
+            entity = random.choice(list(self.zero_hop_dict[distractor_type].keys()))
             if entity not in chosen_entities:
                 chosen_entities.add(entity)
-                premise.append(f"{entity} is {self.zero_hop_dict[type][entity]}")
+                premise.append(f"{entity} is {self.zero_hop_dict[distractor_type][entity]}")
         
         self.last_used_id += 1
         random.shuffle(premise)
